@@ -1,0 +1,120 @@
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <sys/wait.h>
+
+int main()
+{
+    int pipe1[2], pipe2[2];
+    pid_t pid;
+
+    char filename[256];
+    char buffer[1024];
+    int n;
+
+    // Create two pipes
+    if(pipe(pipe1) == -1 || pipe(pipe2) == -1)
+    {
+        perror("Pipe creation failed");
+        return 1;
+    }
+
+    // Create child process
+    pid = fork();
+
+    if(pid < 0)
+    {
+        perror("Fork failed");
+        return 1;
+    }
+
+    // CHILD PROCESS
+    else if(pid == 0)
+    {
+        FILE *fp;
+
+        close(pipe1[1]);
+        close(pipe2[0]);
+
+        // Read filename from parent
+        n = read(pipe1[0], filename, sizeof(filename) - 1);
+
+        if(n <= 0)
+        {
+            printf("Filename not received.\n");
+            close(pipe1[0]);
+            close(pipe2[1]);
+            exit(1);
+        }
+
+        filename[n] = '\0';
+        close(pipe1[0]);
+
+        printf("\nChild Process\n");
+        printf("Received filename: %s\n", filename);
+
+        // Open file
+        fp = fopen(filename, "r");
+
+        if(fp == NULL)
+        {
+            perror("File opening failed");
+            close(pipe2[1]);
+            exit(1);
+        }
+
+        // Read file and send contents to parent
+        while((n = fread(buffer, 1, sizeof(buffer), fp)) > 0)
+        {
+            if(write(pipe2[1], buffer, n) != n)
+            {
+                perror("Write failed");
+                fclose(fp);
+                close(pipe2[1]);
+                exit(1);
+            }
+        }
+
+        printf("File contents sent to parent.\n");
+
+        fclose(fp);
+        close(pipe2[1]);
+        exit(0);
+    }
+
+    // PARENT PROCESS
+    else
+    {
+        close(pipe1[0]);
+        close(pipe2[1]);
+
+        // Accept filename
+        printf("Parent Process\n");
+        printf("Enter file pathname: ");
+
+        scanf("%255s", filename);
+
+        // Send filename to child
+        write(pipe1[1], filename, strlen(filename));
+
+        close(pipe1[1]);
+
+        printf("\nFile contents received from child:\n\n");
+
+        // Read file contents from child
+        while((n = read(pipe2[0], buffer, sizeof(buffer))) > 0)
+        {
+            write(STDOUT_FILENO, buffer, n);
+        }
+
+        close(pipe2[0]);
+
+        wait(NULL);
+
+        printf("\n\nParent process completed.\n");
+    }
+
+    return 0;
+}
